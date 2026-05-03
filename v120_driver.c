@@ -254,13 +254,18 @@ static int v120_cv_open(struct inode *inode, struct file *file)
 static ssize_t v120_validate_count(loff_t pos, size_t count,
                                    struct v120_chardev_t *vc)
 {
+        // length of the base addr register
         size_t len = (size_t)vc->c_bar->len;
+
+        // if the offset we want to read is greater than the length of the BAR return -1
         if (pos >= len)
                 return -1;
 
+        // bound count at the length
         if (count > len)
                 count = len;
 
+        // also bound the count to the length if too long
         if (count + pos > len)
                 count = len - pos;
 
@@ -275,6 +280,8 @@ static ssize_t v120_validate_count(loff_t pos, size_t count,
  * This method ignores consideration for things like alignment and
  * uses the kernel's memcpy methods, which may vary depending on
  * platform and architecture.
+ *
+ * Copies bytes from the BAR1 register to buffer in user space starting at some offset
  */
 static ssize_t v120_cv_read(struct file *file, char __user *ubuf,
                             size_t count, loff_t *pos)
@@ -284,19 +291,30 @@ static ssize_t v120_cv_read(struct file *file, char __user *ubuf,
         int ret;
         loff_t tpos = *pos;
 
+        // for the file* passed in returns the private data of that file which is aparently one of the chardev's for this v120_dev_t
         vc = to_v120_chardev(file);
+
         NOTIFY_DEPRECATED(vc);
+
+
+        // v120_validate_count returns -1 if the count to be read is more than the bar length, and bounds the count at the length of the bar
         if ((count = v120_validate_count(tpos, count, vc)) < 0)
                 return -EIO;
         else if (count == 0)
                 return 0;
+
         ret = count;
 
+        // Get the base address of the bar (going to be BAR1 for char device) for this char device
         src = vc->c_bar->mapbase;
+
         if (src == NULL)
                 return -EIO;
+
+        // move src to point at the starting point of the BAR1 specified by user in this read request
         src += tpos;
 
+        // standard max 32 * 4 byte copy at a time
         while ((ssize_t)count > 0) {
                 u32 tbuf[32];
                 size_t tlen = sizeof(tbuf);
@@ -313,6 +331,8 @@ static ssize_t v120_cv_read(struct file *file, char __user *ubuf,
                 count -= tlen;
                 ubuf += tlen;
         }
+
+        // return how much was copied to user
         *pos = tpos + ret;
         return ret;
 }
