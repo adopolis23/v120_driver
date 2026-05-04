@@ -254,18 +254,14 @@ static int v120_cv_open(struct inode *inode, struct file *file)
 static ssize_t v120_validate_count(loff_t pos, size_t count,
                                    struct v120_chardev_t *vc)
 {
-        // length of the base addr register
+        // Length of the base address register
         size_t len = (size_t)vc->c_bar->len;
 
-        // if the offset we want to read is greater than the length of the BAR return -1
+        // If the offset to read from is greater than the length of the BAR return error
         if (pos >= len)
                 return -1;
 
-        // bound count at the length
-        if (count > len)
-                count = len;
-
-        // also bound the count to the length if too long
+        // If the position to read from plus the size to read is greater than the length of the BAR then bound the count to the distance between where you want to read from and the length of BAR.
         if (count + pos > len)
                 count = len - pos;
 
@@ -291,13 +287,13 @@ static ssize_t v120_cv_read(struct file *file, char __user *ubuf,
         int ret;
         loff_t tpos = *pos;
 
-        // for the file* passed in returns the private data of that file which is aparently one of the chardev's for this v120_dev_t
-        vc = to_v120_chardev(file);
+        // For the file* argument, returns the private data of that file, in this case it is the v120 character device
+        vc = to_v120_hardev(file);
 
         NOTIFY_DEPRECATED(vc);
 
 
-        // v120_validate_count returns -1 if the count to be read is more than the bar length, and bounds the count at the length of the bar
+        // Returns -1 if the count to be read is more than the bar length, and bounds the count at the length of the bar
         if ((count = v120_validate_count(tpos, count, vc)) < 0)
                 return -EIO;
         else if (count == 0)
@@ -311,10 +307,10 @@ static ssize_t v120_cv_read(struct file *file, char __user *ubuf,
         if (src == NULL)
                 return -EIO;
 
-        // move src to point at the starting point of the BAR1 specified by user in this read request
+        // Move src to point at the starting point of the BAR1 specified by user in this read request
         src += tpos;
 
-        // standard max 32 * 4 byte copy at a time
+        // Double copy loop from Memmory Mapped IO space into temp kernel buffer and then into the user space buffer
         while ((ssize_t)count > 0) {
                 u32 tbuf[32];
                 size_t tlen = sizeof(tbuf);
@@ -332,7 +328,7 @@ static ssize_t v120_cv_read(struct file *file, char __user *ubuf,
                 ubuf += tlen;
         }
 
-        // return how much was copied to user
+        // Return how many bytes were copied to user buffer
         *pos = tpos + ret;
         return ret;
 }
@@ -963,6 +959,7 @@ static int v120_map_bars(struct v120_dev_t *v120, unsigned int bar)
         struct v120_bar_t *pbar = &v120->p_bar[bar];
         struct pci_dev *pdev = v120->p_pci_dev;
 
+        // Gets the start, end physical addresses and length stored in the pdev struct by the OS after detecting this PCI card
         pbar->start = pci_resource_start(pdev, bar);
         pbar->end   = pci_resource_end(pdev, bar);
         pbar->len   = pci_resource_len(pdev, bar);
@@ -971,6 +968,7 @@ static int v120_map_bars(struct v120_dev_t *v120, unsigned int bar)
                 return -ENOSPC;
         }
 
+        // This performs a remap of the physical address of the BAR into the kernels virtual address space
         pbar->mapbase = ioremap(pbar->start, pbar->len);
         if (pbar->mapbase == NULL) {
                 v120_warning(v120,
@@ -1224,11 +1222,17 @@ static int v120_probe(struct pci_dev *pdev,
 
         /* Usual pci-device initialization stuff */
         dev_set_drvdata(&pdev->dev, v120);
+
+        // Takes the device out of any low power / sleep state, might also assign initial BARs to device?
         if ((result = pci_enable_device(pdev)) != 0) {
                 v120_debug(v120, "pci_enable_device()=%d\n", result);
                 goto err_enable;
         }
+
+        // Sets the 'Bus Master' bit in PCI command register allowing DMA to proceed
         pci_set_master(pdev);
+
+        // Reserves this devices BARs
         if ((result = pci_request_regions(pdev, DRV_NAME)) != 0) {
                 v120_debug(v120, "pci_request_regions()=%d\n", result);
                 goto err_regions;
@@ -1236,6 +1240,7 @@ static int v120_probe(struct pci_dev *pdev,
 
         /* V120 configuration, mapping, v120's regptr init, etc. */
         v120_handle_revid(v120);
+
         if ((result = v120_initialize_bars(v120)) != 0) {
                 v120_debug(v120, "v120_initialize_bars()=%d\n", result);
                 goto err_map;

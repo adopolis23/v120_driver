@@ -78,7 +78,7 @@ struct file;
  * @start:      Start physical address
  * @end:        End physical address
  * @len:        span of start and end
- * @mapbase:    ioremap() of .start field
+ * @mapbase:    ioremap() of .start field, Virtual address in kernel space
  */
 struct v120_bar_t {
         resource_size_t start;
